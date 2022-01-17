@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -13,7 +17,13 @@ const (
 
 var numericKeyboard = tgbotapi.NewReplyKeyboard(
 	tgbotapi.NewKeyboardButtonRow(
-		tgbotapi.NewKeyboardButton("weather"),
+		tgbotapi.NewKeyboardButton("Moscow"),
+	),
+	tgbotapi.NewKeyboardButtonRow(
+		tgbotapi.NewKeyboardButton("London"),
+	),
+	tgbotapi.NewKeyboardButtonRow(
+		tgbotapi.NewKeyboardButton("Tula"),
 	),
 )
 
@@ -33,15 +43,26 @@ func main() {
 	updates := bot.GetUpdatesChan(u)
 
 	for update := range updates {
-		if update.Message == nil { // ignore non-Message updates
+		if update.Message == nil {
 			continue
 		}
 
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+		chatID := update.Message.Chat.ID
+		msg := tgbotapi.NewMessage(chatID, update.Message.Text)
 
 		switch update.Message.Text {
 		case "open":
 			msg.ReplyMarkup = numericKeyboard
+		case "Moscow", "London", "Tula":
+			var w Weather
+			err := getWeather(&w, update.Message.Text)
+			if err != nil {
+				panic(err)
+			}
+			msg_weather := tgbotapi.NewMessage(chatID, fmt.Sprintf("%v", w.Current.TempC))
+			if _, err := bot.Send(msg_weather); err != nil {
+				log.Panic(err)
+			}
 		case "close":
 			msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 		}
@@ -66,7 +87,7 @@ type Weather struct {
 	Current struct {
 		LastUpdatedEpoch int     `json:"last_updated_epoch"`
 		LastUpdated      string  `json:"last_updated"`
-		TempC            int     `json:"temp_c"`
+		TempC            float64 `json:"temp_c"`
 		TempF            float64 `json:"temp_f"`
 		IsDay            int     `json:"is_day"`
 		Condition        struct {
@@ -104,14 +125,27 @@ type Weather struct {
 	} `json:"current"`
 }
 
-func getWeather(city string) err , *Weather {
-	var w Weather
-
-	url := "http://api.weatherapi.com/v1/current.json?q=Moscow&aqi=yes&key=" + WEATHER
+func getWeather(w *Weather, city string) error {
+	url := "http://api.weatherapi.com/v1/current.json?q=" + city + "&aqi=yes&key=" + WEATHER
 
 	resp, err := http.Get(url)
 	if err != nil {
-		return err, nil
+		return err
 	}
-	
+
+	defer resp.Body.Close()
+
+	jsonData, err := ioutil.ReadAll(resp.Body)
+
+	if err != nil {
+		return err
+	}
+
+	err = json.Unmarshal([]byte(jsonData), w)
+
+	if err != nil {
+		return err
+	}
+
+	return err
 }
